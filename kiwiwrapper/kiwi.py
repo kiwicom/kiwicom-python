@@ -3,10 +3,12 @@ import sys
 import time
 
 import requests
-
-import pprint
+import dicttoxml
 
 from kiwiwrapper import session
+
+from xml.dom.minidom import parseString
+import pprint
 
 try:
     import lxml.etree as etree
@@ -52,47 +54,32 @@ class Search(object):
         self.time_settings = time_zone.lower()
         self.response_format = response_format.lower()
 
-    """
-    @staticmethod
-    def _params_maker(params, req_keys, extra_keys=None):
-        try:
-            params_list = [params.pop(key) for key in req_keys]
-        except KeyError as e:
-            raise ExpectedParameter('Missing request parameter: '
-                                    '{}'.format(e))
-        if extra_keys:
-            params_list.extend([params.pop(key) for key in params])
-        return '&'.join(str(par) for par in params_list)
-    """
-
     @staticmethod
     def _params_maker(params, extra_keys):
         """
-        Beta solution
         :param params: 
         :param extra_keys: 
         :return: 
         """
-        params_path = ''
-        if params:
-            for (key, value) in params.items():
-                if key not in extra_keys:
-                    raise UnexpectedParameter(
-                        'Method get wrong parameters: "{}", '.format(key) +
-                        'supported parameters are: {}'.format(', '.join(extra_keys))
-                    )
-                params_part = key + '=' + value
-                params_path = params_path + params_part + '&'
-            params_path = '?' + params_path[:-1]
-        return params_path
+        for (key, value) in params.items():
+            if key == 'bounds':
+                params[key] = requests.utils.quote(value)
+        params_path = list(
+            (key + '=' + value) for (key, value) in params.items()
+            if key in extra_keys
+        )
+        return '?' + '&'.join(params_path)
 
     @staticmethod
     def _parse_response(response, response_format):
+        """
         if response_format == 'xml':
-            response.parsed = etree.fromstring(response.content)
-            return response.parsed
+            return dicttoxml.dicttoxml(response.json())
         else:
             return response.json()
+        """
+        response.parsed = dicttoxml.dicttoxml(response.json()) if response_format == 'xml' else response.json()
+        return response
 
     def places(self, headers=None, **params):
         """
@@ -111,14 +98,20 @@ class Search(object):
         )
         path = '{api_host}/places{params_path}'.format(api_host=self.API_HOST,
                                                        params_path=self._params_maker(params, extra_keys))
+        print(path)
         response = session.get(path, headers=headers)
         return self._parse_response(response, self.response_format)
 
-    def flights(self, **params):
+    def search_flights(self, partner='picky', **params):
         pass
-
+        # if self.response_format == 'xml'
+        #     params[xml] = 1
 
 if __name__ == '__main__':
-    s = Search()
-#    print(Search._params_maker(pr, rq))
-    print(pprint.pformat(s.places(id='SK', term='br', headers={'Accept': 'application/json'})))
+    response_type = 'json'
+    s = Search(response_format=response_type)
+    res = s.places(id='SK', term='br', bounds='lat_lo,lat_hi')
+    if response_type == 'xml':
+        print(parseString(res.parsed).toprettyxml())
+    else:
+        print(pprint.pformat(res.json()))

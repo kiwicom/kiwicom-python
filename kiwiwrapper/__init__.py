@@ -1,5 +1,2 @@
-import requests
-
-session = requests.session()
-
+from .kiwi import Transport
 from .kiwi import Search

@@ -1,2 +1,2 @@
-from .kiwi import Transport
+from .kiwi import Kiwicom
 from .kiwi import Search

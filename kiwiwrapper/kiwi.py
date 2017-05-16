@@ -2,7 +2,7 @@ import datetime
 import logging
 import sys
 import os
-import configparser
+from configparser import ConfigParser
 
 from structlog import get_logger
 from structlog import configure
@@ -16,7 +16,8 @@ from xml.dom.minidom import parseString
 import pprint
 
 
-def configure_logger(log_level, log_file):
+def _configure_logger(log_level='DEBUG', log_file='log.log'):
+    lvl = getattr(logging, log_level.upper())
     configure(
         processors=[
             stdlib.filter_by_level,
@@ -34,12 +35,13 @@ def configure_logger(log_level, log_file):
         cache_logger_on_first_use=True,
     )
     handler = logging.FileHandler(filename=log_file)
-    handler.setFormatter(jsonlogger.JsonFormatter('%(asctime)s %(filename)s '
-                                                  '%(lineno)d %(message)s'))
+    handler.setFormatter(jsonlogger.JsonFormatter('%(asctime)s %(filename)s %(lineno)d %(message)s'))
     logger = get_logger(__name__)
-    logger.setLevel(log_level)
+    logger.setLevel(lvl)
     logger.addHandler(handler)
     return logger
+
+log = _configure_logger()
 
 
 class UnexpectedParameter(KeyError):
@@ -54,16 +56,25 @@ class EmptyResponse(Exception):
     pass
 
 
-class Transport(object):
+class Kiwicom(object):
     """
     Parent class for initialisation
     """
-    _FORMATS = ('json', 'xml')
+    _FORMATS = (
+        'json',
+        'xml'
+    )
     _TIME_ZONES = 'gmt'
-    _LOG_FORMATS = ('DEBUG', 'INFO', 'WARN', 'WARNING', 'ERROR', 'CRITICAL')
+    _LOG_FORMATS = (
+        'DEBUG',
+        'INFO',
+        'WARN',
+        'WARNING',
+        'ERROR',
+        'CRITICAL'
+    )
 
-    def __init__(self, log_level='WARNING', log_file='logs.log',
-                 time_zone='gmt', cfg='apiconfig.ini'):
+    def __init__(self, log_level='WARNING', log_file='logs.log', time_zone='gmt', cfg='apiconfig.ini'):
         """
         :param log_level: 
         :param log_file: 
@@ -72,20 +83,17 @@ class Transport(object):
         if time_zone.lower() not in self._TIME_ZONES:
             raise ValueError(
                 'Unknown time zone: {}, '
-                'supported time zones are {}'
-                ''.format(time_zone, ', '.join(self._TIME_ZONES))
+                'supported time zones are {}'.format(time_zone, self._TIME_ZONES)
             )
         if log_level.upper() not in self._LOG_FORMATS:
             raise ValueError(
                 'Unknown log format: {}, '
-                'supported log formats are {}'
-                ''.format(log_level, ', '.join(self._LOG_FORMATS))
+                'supported log formats are {}'.format(log_level, ', '.join(self._LOG_FORMATS))
             )
-        self.time_settings = time_zone.lower()
+        self.time_zone = time_zone.lower()
         self._read_cfg(cfg)
-        self.API_HOST = os.environ['API_HOST']
-        self.log = configure_logger(log_level=log_level.upper(),
-                                    log_file=log_file)
+        self.API_HOST = os.environ.get('API_HOST_SRCH')
+        # self.log = _configure_logger(log_level=log_level.upper(), log_file=log_file)
 
     def make_request(self, service_url, params, method='get', headers=None,
                      data=None, stream=False, json_data=None, callback=None):
@@ -103,18 +111,15 @@ class Transport(object):
         if callback is None:
             callback = self._default_callback
 
-        self.log.debug('Request', URL=service_url, method=method.upper(),
-                       params=params, headers=headers)
+        log.debug('Request', URL=service_url, method=method.upper(), params=params, headers=headers)
 
         request = getattr(requests, method.lower())
-        r = request(service_url, params=params, headers=headers, data=data,
-                    stream=stream, json=json_data)
-
+        r = request(service_url, params=params, headers=headers, data=data, stream=stream, json=json_data)
         try:
             r.raise_for_status()
             return callback(r)
         except Exception as e:
-            return self._error_handling(e)
+            return self._error_handling(r, e)
 
     # @staticmethod
     # def _params_maker(params, extra_keys):
@@ -144,14 +149,30 @@ class Transport(object):
 
     @staticmethod
     def _read_cfg(cfg_file):
-        config = configparser.ConfigParser()
+        config = ConfigParser()
         config.read(cfg_file)
-        host = config['DEFAULT']['api-host']
-        os.environ['API_HOST'] = host
+        search_host = config['DEFAULT']['search-host']
+        booking_host = config['DEFAULT']['booking-host']
+        os.environ['API_HOST_SRCH'] = search_host
+        os.environ['API_HOST_BOOK'] = booking_host
 
     @staticmethod
-    def _error_handling(response):
-        return response
+    def _error_handling(response, error):
+        if isinstance(error, requests.HTTPError):
+            if response.status_code == 400:
+                error = requests.HTTPError(
+                    '%s: Request parameters were rejected by the server' % error,
+                    response=response
+                )
+            elif response.status_code == 429:
+                error = requests.HTTPError(
+                    '%s: Too many requests in the last minute' % error,
+                    response=response
+                )
+            raise error
+        else:
+            log.error(error)
+            return response
 
     @staticmethod
     def _default_callback(response):
@@ -161,7 +182,7 @@ class Transport(object):
         return response
 
 
-class Search(Transport):
+class Search(Kiwicom):
     """
     Search Class
     """
@@ -228,8 +249,7 @@ class Search(Transport):
 
         service_url = "{API_HOST}/flights".format(API_HOST=self.API_HOST)
         return self.make_request(service_url,
-                                 params=self._params_maker(params=params,
-                                                           req_params=required_params),
+                                 params=self._params_maker(params=params, req_params=required_params),
                                  headers=headers,
                                  stream=stream)
 
@@ -256,17 +276,22 @@ class Search(Transport):
                                  headers=headers)
 
 
-class Booking(Transport):
+class Booking(Kiwicom):
     """
     Booking Class
     """
-    pass
+    def __init__(self, api_key, log_level='WARNING', log_file='logs.log', time_zone='gmt', cfg='apiconfig.ini'):
+        super().__init__(log_level, log_file, time_zone, cfg)
+        self.api_key = api_key
+        self.API_HOST = os.environ.get('API_HOST_BOOK')
 
 
 if __name__ == '__main__':
-    s = Search(log_level='debug', log_file='info.log')
-    # res = s.places(id='SK', term='br', bounds='lat_lo,lat_hi', headers='Accept: application/xml')
-    res1 = s.search_flights(fly_from='CZ', date_from='03/05/2017', date_to='13/05/2017', partner_market='US')
+    # _configure_logger(log_level='debug', log_file='hi.log')
+    s = Search(log_level='debug', log_file='debug.log')
+
+    # res = s.places(id='SK', term='br', bounds='lat_lo,lat_hi')
+    # res1 = s.search_flights(fly_from='CZ', date_from='03/05/2017', date_to='13/05/2017', partner_market='US')
     v = {"requests": [
         {"v": 2, "sort": "duration", "asc": 1, "locale": "en", "daysInDestinationFrom": "", "daysInDestinationTo": "",
          "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BRQ", "to": "BCN", "featureName": "results",
@@ -276,7 +301,10 @@ if __name__ == '__main__':
          "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BCN", "to": "ZAG", "featureName": "results",
          "dateFrom": "12/06/2017", "dateTo": "15/06/2017", "typeFlight": "oneway", "returnFrom": "", "returnTo": "",
          "one_per_date": 0, "oneforcity": 0, "wait_for_refresh": 0, "adults": 1}], "limit": 45}
-    # res2 = s.search_flights_multi(json_data=v)
+    res2 = s.search_flights_multi(json_data=v)
     # print(parseString(res1).toprettyxml())
-    # pprint.pprint(res2.json())
-    pprint.pprint(res1.json())
+    pprint.pprint(res2.json())
+    # pprint.pprint(res1.json())
+    # _configure_logger(log_level='debug', log_file='gg.log')
+
+    # b = Booking(api_key='hello', time_zone='gmt')

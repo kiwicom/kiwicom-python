@@ -2,7 +2,9 @@ import datetime
 import logging
 import sys
 import os
+import io
 from configparser import ConfigParser
+
 
 from structlog import get_logger
 from structlog import configure
@@ -35,7 +37,9 @@ def _configure_logger(log_level='DEBUG', log_file='log.log'):
         cache_logger_on_first_use=True,
     )
     handler = logging.FileHandler(filename=log_file)
-    handler.setFormatter(jsonlogger.JsonFormatter('%(asctime)s %(filename)s %(lineno)d %(message)s'))
+    handler.setFormatter(jsonlogger.JsonFormatter(
+        '%(asctime)s %(filename)s %(lineno)d %(message)s'
+    ))
     logger = get_logger(__name__)
     logger.setLevel(lvl)
     logger.addHandler(handler)
@@ -60,24 +64,10 @@ class Kiwicom(object):
     """
     Parent class for initialisation
     """
-    _FORMATS = (
-        'json',
-        'xml'
-    )
     _TIME_ZONES = 'gmt'
-    _LOG_FORMATS = (
-        'DEBUG',
-        'INFO',
-        'WARN',
-        'WARNING',
-        'ERROR',
-        'CRITICAL'
-    )
 
-    def __init__(self, log_level='WARNING', log_file='logs.log', time_zone='gmt', cfg='apiconfig.ini'):
-        """
-        :param log_level: 
-        :param log_file: 
+    def __init__(self, time_zone='gmt', cfg='config.ini'):
+        """ 
         :param time_zone: 
         """
         if time_zone.lower() not in self._TIME_ZONES:
@@ -85,24 +75,16 @@ class Kiwicom(object):
                 'Unknown time zone: {}, '
                 'supported time zones are {}'.format(time_zone, self._TIME_ZONES)
             )
-        if log_level.upper() not in self._LOG_FORMATS:
-            raise ValueError(
-                'Unknown log format: {}, '
-                'supported log formats are {}'.format(log_level, ', '.join(self._LOG_FORMATS))
-            )
         self.time_zone = time_zone.lower()
-        self._read_cfg(cfg)
-        self.API_HOST = os.environ.get('API_HOST_SRCH')
-        # self.log = _configure_logger(log_level=log_level.upper(), log_file=log_file)
+        self.API_HOSTS = self._read_cfg(cfg)
 
-    def make_request(self, service_url, params, method='get', headers=None,
-                     data=None, stream=False, json_data=None, callback=None):
+    def make_request(self, service_url, params, method='get', callback=None,
+                     data=None, json_data=None, request_args=None):
         """
-        :param json_data: 
-        :param stream: 
+        :param request_args: 
+        :param json_data:  
         :param service_url: 
-        :param method: 
-        :param headers: 
+        :param method:  
         :param data: 
         :param callback: 
         :param params: 
@@ -111,10 +93,21 @@ class Kiwicom(object):
         if callback is None:
             callback = self._default_callback
 
-        log.debug('Request', URL=service_url, method=method.upper(), params=params, headers=headers)
+        log.debug('Request', URL=service_url, method=method.upper(),
+                  params=params, request_args=request_args)
 
         request = getattr(requests, method.lower())
-        r = request(service_url, params=params, headers=headers, data=data, stream=stream, json=json_data)
+        # if request_args == None:
+        #     r = request(service_url, params=params, data=data, json=json_data)
+        # else:
+        #     r = request(service_url, params=params, data=data, json=json_data, **request_args)
+        try:
+            r = request(service_url, params=params, data=data, json=json_data, **request_args)
+        except TypeError as err:
+            r = request(service_url, params=params, data=data, json=json_data)
+            if request_args is not None:
+                log.warning(err)
+
         try:
             r.raise_for_status()
             return callback(r)
@@ -151,23 +144,20 @@ class Kiwicom(object):
     def _read_cfg(cfg_file):
         config = ConfigParser()
         config.read(cfg_file)
-        search_host = config['DEFAULT']['search-host']
-        booking_host = config['DEFAULT']['booking-host']
-        os.environ['API_HOST_SRCH'] = search_host
-        os.environ['API_HOST_BOOK'] = booking_host
+        return config['HOSTS']['search'], config['HOSTS']['booking']
 
     @staticmethod
     def _error_handling(response, error):
         if isinstance(error, requests.HTTPError):
             if response.status_code == 400:
                 error = requests.HTTPError(
-                    '%s: Request parameters were rejected by the server' % error,
-                    response=response
+                    '%s: Request parameters were rejected by the server'
+                    % error, response=response
                 )
             elif response.status_code == 429:
                 error = requests.HTTPError(
-                    '%s: Too many requests in the last minute' % error,
-                    response=response
+                    '%s: Too many requests in the last minute'
+                    % error, response=response
                 )
             raise error
         else:
@@ -178,7 +168,6 @@ class Kiwicom(object):
     def _default_callback(response):
         if not response or not response.content:
             raise EmptyResponse('Response has no content.')
-        # parsed_resp = self._parse_response(response, self.response_format)
         return response
 
 
@@ -187,9 +176,10 @@ class Search(Kiwicom):
     Search Class
     """
 
-    def places(self, **params):
+    def places(self, request_args=None, **params):
         """
         Get request with params to api.skypicker.com/places
+        :param request_args: 
         :param params: extra parameters: 
         (
             'id',
@@ -201,15 +191,15 @@ class Search(Kiwicom):
         )
         :return: Json of skypicker api ids
         """
-        service_url = "{API_HOST}/places".format(API_HOST=self.API_HOST)
+        service_url = "{API_HOST}/places".format(API_HOST=self.API_HOSTS[0])
         return self.make_request(service_url,
-                                 params=params)
+                                 params=params,
+                                 request_args=request_args)
 
     def search_flights(self, fly_from, partner_market, date_from, date_to,
-                       partner='picky', headers=None, stream=False, **params):
+                       partner='picky', request_args=None, **params):
         """  
-        :param stream: 
-        :param headers: 
+        :param request_args:  
         :param fly_from: Skypicker api id of the departure destination. 
                 Accepts multiple values separated by comma, 
                 these values might be airport codes, city IDs, two letter country codes, 
@@ -247,19 +237,18 @@ class Search(Kiwicom):
             'partner_market': partner_market
         }
 
-        service_url = "{API_HOST}/flights".format(API_HOST=self.API_HOST)
+        service_url = "{API_HOST}/flights".format(API_HOST=self.API_HOSTS[0])
         return self.make_request(service_url,
-                                 params=self._params_maker(params=params, req_params=required_params),
-                                 headers=headers,
-                                 stream=stream)
+                                 params=self._params_maker(params=params,
+                                                           req_params=required_params),
+                                 request_args=request_args)
 
-    def search_flights_multi(self, json_data=None, data=None,
-                             headers=None, **params):
+    def search_flights_multi(self, json_data=None, data=None, request_args=None, **params):
         """
         
+        :param request_args: 
         :param json_data: 
         :param data: 
-        :param headers: 
         :param params:
         :required_data: 
         (
@@ -267,31 +256,37 @@ class Search(Kiwicom):
         )
         :return: 
         """
-        service_url = "{API_HOST}/flights_multi".format(API_HOST=self.API_HOST)
+        service_url = "{API_HOST}/flights_multi".format(API_HOST=self.API_HOSTS[0])
         return self.make_request(service_url,
                                  params=params,
                                  method='post',
                                  json_data=json_data,
                                  data=data,
-                                 headers=headers)
+                                 request_args=request_args)
 
 
 class Booking(Kiwicom):
     """
     Booking Class
     """
-    def __init__(self, api_key, log_level='WARNING', log_file='logs.log', time_zone='gmt', cfg='apiconfig.ini'):
-        super().__init__(log_level, log_file, time_zone, cfg)
+    def __init__(self, api_key, time_zone='gmt', cfg='config.ini'):
+        super().__init__(time_zone, cfg)
         self.api_key = api_key
-        self.API_HOST = os.environ.get('API_HOST_BOOK')
+
+    # def __init__(self, api_key, time_zone='', cfg='apiconfig.ini'):
+    #     Kiwicom.__init__(self, time_zone, cfg)
+    #     self.api_key = api_key
 
 
 if __name__ == '__main__':
     # _configure_logger(log_level='debug', log_file='hi.log')
-    s = Search(log_level='debug', log_file='debug.log')
-
-    # res = s.places(id='SK', term='br', bounds='lat_lo,lat_hi')
-    # res1 = s.search_flights(fly_from='CZ', date_from='03/05/2017', date_to='13/05/2017', partner_market='US')
+    s = Search()
+    # request_args = {
+    #     'headers': {'Content-type': 'application/xml'},
+    #     'cookies': {'cookies_are': 'worked'}
+    # }
+    res = s.places(id='SK', term='br', bounds='lat_lo,lat_hi')
+    res1 = s.search_flights(fly_from='CZ', date_from='03/05/2017', date_to='13/05/2017', partner_market='US')
     v = {"requests": [
         {"v": 2, "sort": "duration", "asc": 1, "locale": "en", "daysInDestinationFrom": "", "daysInDestinationTo": "",
          "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BRQ", "to": "BCN", "featureName": "results",
@@ -303,8 +298,5 @@ if __name__ == '__main__':
          "one_per_date": 0, "oneforcity": 0, "wait_for_refresh": 0, "adults": 1}], "limit": 45}
     res2 = s.search_flights_multi(json_data=v)
     # print(parseString(res1).toprettyxml())
-    pprint.pprint(res2.json())
-    # pprint.pprint(res1.json())
-    # _configure_logger(log_level='debug', log_file='gg.log')
-
-    # b = Booking(api_key='hello', time_zone='gmt')
+    # pprint.pprint(res2.json())
+    pprint.pprint(res.json())

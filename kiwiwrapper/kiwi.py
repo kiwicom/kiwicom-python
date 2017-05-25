@@ -3,8 +3,6 @@ import logging
 import sys
 import os
 import io
-from configparser import ConfigParser
-
 
 from structlog import get_logger
 from structlog import configure
@@ -13,12 +11,13 @@ from structlog import stdlib
 import requests
 from pythonjsonlogger import jsonlogger
 
+import settings
 # Just for pretty printing
 from xml.dom.minidom import parseString
 import pprint
 
 
-def _configure_logger(log_level='DEBUG', log_file='log.log'):
+def configure_logger(log_level='debug', log_file='logs.log'):
     lvl = getattr(logging, log_level.upper())
     configure(
         processors=[
@@ -45,7 +44,7 @@ def _configure_logger(log_level='DEBUG', log_file='log.log'):
     logger.addHandler(handler)
     return logger
 
-log = _configure_logger()
+log = configure_logger()
 
 
 class UnexpectedParameter(KeyError):
@@ -66,7 +65,7 @@ class Kiwicom(object):
     """
     _TIME_ZONES = 'gmt'
 
-    def __init__(self, time_zone='gmt', cfg='config.ini'):
+    def __init__(self, time_zone='gmt'):
         """ 
         :param time_zone: 
         """
@@ -76,7 +75,7 @@ class Kiwicom(object):
                 'supported time zones are {}'.format(time_zone, self._TIME_ZONES)
             )
         self.time_zone = time_zone.lower()
-        self.API_HOSTS = self._read_cfg(cfg)
+        self.API_HOSTS = (os.environ.get("API_SEARCH"), os.environ.get("API_BOOKING"))
 
     def make_request(self, service_url, params, method='get', callback=None,
                      data=None, json_data=None, request_args=None):
@@ -97,10 +96,7 @@ class Kiwicom(object):
                   params=params, request_args=request_args)
 
         request = getattr(requests, method.lower())
-        # if request_args == None:
-        #     r = request(service_url, params=params, data=data, json=json_data)
-        # else:
-        #     r = request(service_url, params=params, data=data, json=json_data, **request_args)
+
         try:
             r = request(service_url, params=params, data=data, json=json_data, **request_args)
         except TypeError as err:
@@ -114,37 +110,11 @@ class Kiwicom(object):
         except Exception as e:
             return self._error_handling(r, e)
 
-    # @staticmethod
-    # def _params_maker(params, extra_keys):
-    #     for (key, value) in params.items():
-    #         if key == 'bounds':
-    #             params[key] = requests.utils.quote(value)
-    #     params_path = list(
-    #         (key + '=' + value) for (key, value) in params.items()
-    #         if key in extra_keys
-    #     )
-    #     return '?' + '&'.join(params_path)
-
-    # @staticmethod
-    # def _parse_response(response, response_format):
-    #     if response_format == 'xml':
-    #         # response.parsed = etree.fromstring(response.content)
-    #         return response
-    #     else:
-    #         response.parsed = response.json()
-    #         return response
-
     @staticmethod
     def _params_maker(params, req_params=None):
         for (key, value) in params.items():
             req_params[key] = value
         return req_params
-
-    @staticmethod
-    def _read_cfg(cfg_file):
-        config = ConfigParser()
-        config.read(cfg_file)
-        return config['HOSTS']['search'], config['HOSTS']['booking']
 
     @staticmethod
     def _error_handling(response, error):
@@ -176,7 +146,7 @@ class Search(Kiwicom):
     Search Class
     """
 
-    def places(self, request_args=None, **params):
+    def search_places(self, request_args=None, **params):
         """
         Get request with params to api.skypicker.com/places
         :param request_args: 
@@ -196,7 +166,7 @@ class Search(Kiwicom):
                                  params=params,
                                  request_args=request_args)
 
-    def search_flights(self, fly_from, partner_market, date_from, date_to,
+    def search_flights(self, fly_from=None, partner_market=None, date_from=None, date_to=None,
                        partner='picky', request_args=None, **params):
         """  
         :param request_args:  
@@ -269,24 +239,28 @@ class Booking(Kiwicom):
     """
     Booking Class
     """
-    def __init__(self, api_key, time_zone='gmt', cfg='config.ini'):
-        super().__init__(time_zone, cfg)
+    def __init__(self, api_key, time_zone='gmt'):
+        super().__init__(time_zone)
         self.api_key = api_key
-
-    # def __init__(self, api_key, time_zone='', cfg='apiconfig.ini'):
-    #     Kiwicom.__init__(self, time_zone, cfg)
-    #     self.api_key = api_key
 
 
 if __name__ == '__main__':
-    # _configure_logger(log_level='debug', log_file='hi.log')
+    # configure_logger(log_level='debug')
     s = Search()
-    # request_args = {
-    #     'headers': {'Content-type': 'application/xml'},
-    #     'cookies': {'cookies_are': 'worked'}
-    # }
-    res = s.places(id='SK', term='br', bounds='lat_lo,lat_hi')
-    res1 = s.search_flights(fly_from='CZ', date_from='03/05/2017', date_to='13/05/2017', partner_market='US')
+    request_args = {
+        'headers': {'Content-type': 'application/xml'},
+        'cookies': {'cookies_are': 'worked'}
+    }
+    res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi', locale='cs')
+    # res1 = s.search_flights(fly_from='CZ', date_from='26/05/2017', date_to='5/06/2017', partner_market='US')
+    prg_to_lgw = {
+        'flyFrom': 'PRG',
+        'to': 'LGW',
+        'dateFrom': '26/05/2017',  # arrow.utcnow().replace(day=10).format('DD/MM/YYYY'),
+        'dateTo': '5/06/2017',  # arrow.utcnow().replace(day=20).format('DD/MM/YYYY'),
+        'partner': 'picky'
+    }
+    # res1 = s.search_flights(params=prg_to_lgw)
     v = {"requests": [
         {"v": 2, "sort": "duration", "asc": 1, "locale": "en", "daysInDestinationFrom": "", "daysInDestinationTo": "",
          "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BRQ", "to": "BCN", "featureName": "results",
@@ -296,7 +270,7 @@ if __name__ == '__main__':
          "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BCN", "to": "ZAG", "featureName": "results",
          "dateFrom": "12/06/2017", "dateTo": "15/06/2017", "typeFlight": "oneway", "returnFrom": "", "returnTo": "",
          "one_per_date": 0, "oneforcity": 0, "wait_for_refresh": 0, "adults": 1}], "limit": 45}
-    res2 = s.search_flights_multi(json_data=v)
+    # res2 = s.search_flights_multi(json_data=v)
     # print(parseString(res1).toprettyxml())
     # pprint.pprint(res2.json())
     pprint.pprint(res.json())

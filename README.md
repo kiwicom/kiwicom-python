@@ -33,7 +33,7 @@ Firstly, you should create payload
 
 Then use it in search_flights_multi method
 
-    res = s.search_flights_multi(json_data=v)
+    res = s.search_flights_multi(json_data=payload)
 ***
 All search methods accept `request_args` as an argument to send some extra parameters to request directly
 (For more information about request args read [requests documentation](http://docs.python-requests.org/en/master))
@@ -46,7 +46,7 @@ If you want to add some extra params to request like **Headers** you should crea
 
 And add it to some search method as an argument
 
-    res = s.search_flights_multi(json_data=v, request_args=request_args)
+    res = s.search_flights_multi(json_data=payload, request_args=request_args)
 
 For parsing use `res.json()`
 

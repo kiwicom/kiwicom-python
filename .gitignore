@@ -151,6 +151,9 @@ ClientBin/
 *.[Pp]ublish.xml
 *.pfx
 *.publishsettings
+kiwipeel_env/
+.env
+
 
 # RIA/Silverlight projects
 Generated_Code/

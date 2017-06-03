@@ -12,12 +12,9 @@ import requests
 from pythonjsonlogger import jsonlogger
 
 import settings
-# Just for pretty printing
-from xml.dom.minidom import parseString
-import pprint
 
 
-def configure_logger(log_level='debug', log_file='logs.log'):
+def configure_logger(log_level='DEBUG', log_file='logs.log'):
     lvl = getattr(logging, log_level.upper())
     configure(
         processors=[
@@ -48,10 +45,6 @@ log = configure_logger()
 
 
 class UnexpectedParameter(KeyError):
-    pass
-
-
-class ExpectedParameter(KeyError):
     pass
 
 
@@ -140,16 +133,30 @@ class Kiwicom(object):
             raise EmptyResponse('Response has no content.')
         return response
 
+    def _params_checker(self, params, params_payload, service_url, request_args):
+        if params and params_payload:
+            raise UnexpectedParameter(
+                'Params and params_payload were taken, only one can be'
+            )
+        elif params_payload and not params:
+            return self.make_request(service_url,
+                                     params=params_payload,
+                                     request_args=request_args)
+        else:
+            return self.make_request(service_url,
+                                     params=params,
+                                     request_args=request_args)
+
 
 class Search(Kiwicom):
     """
     Search Class
     """
 
-    def search_places(self, request_args=None, **params):
+    def search_places(self, params_payload=None, request_args=None, **params):
         """
-        Get request with params to api.skypicker.com/places
-        :param request_args: 
+        Get request with parameters
+        :param request_args: extra args to requests.get
         :param params: extra parameters: 
         (
             'id',
@@ -159,16 +166,18 @@ class Search(Kiwicom):
             'bounds',
             'v'
         )
+        :param params_payload: takes payload with params
         :return: Json of skypicker api ids
         """
         service_url = "{API_HOST}/places".format(API_HOST=self.API_HOSTS[0])
-        return self.make_request(service_url,
-                                 params=params,
-                                 request_args=request_args)
+        return self._params_checker(params=params,
+                                    params_payload=params_payload,
+                                    service_url=service_url,
+                                    request_args=request_args)
 
-    def search_flights(self, fly_from=None, partner_market=None, date_from=None, date_to=None,
-                       partner='picky', request_args=None, **params):
+    def search_flights(self, request_args=None, params_payload=None, **params):
         """  
+        :param params_payload:
         :param request_args:  
         :param fly_from: Skypicker api id of the departure destination. 
                 Accepts multiple values separated by comma, 
@@ -199,19 +208,11 @@ class Search(Kiwicom):
         :param params: all other extra params
         :return: response with JSON or XML content
         """
-        required_params = {
-            'flyFrom': fly_from,
-            'dateFrom': date_from,
-            'dateTo': date_to,
-            'partner': partner,
-            'partner_market': partner_market
-        }
-
         service_url = "{API_HOST}/flights".format(API_HOST=self.API_HOSTS[0])
-        return self.make_request(service_url,
-                                 params=self._params_maker(params=params,
-                                                           req_params=required_params),
-                                 request_args=request_args)
+        return self._params_checker(params=params,
+                                    params_payload=params_payload,
+                                    service_url=service_url,
+                                    request_args=request_args)
 
     def search_flights_multi(self, json_data=None, data=None, request_args=None, **params):
         """
@@ -245,32 +246,37 @@ class Booking(Kiwicom):
 
 
 if __name__ == '__main__':
-    # configure_logger(log_level='debug')
+    from pprint import pprint
+    import arrow
     s = Search()
-    request_args = {
-        'headers': {'Content-type': 'application/xml'},
-        'cookies': {'cookies_are': 'worked'}
+    payload = {
+        'id': 'SK',
+        'term': 'br',
+        'bounds': 'lat_lo,lat_hi',
+        'locale': 'cs'
     }
-    res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi', locale='cs')
-    # res1 = s.search_flights(fly_from='CZ', date_from='26/05/2017', date_to='5/06/2017', partner_market='US')
+    # res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi', locale='cs')
+    res = s.search_places(params_payload=payload)
     prg_to_lgw = {
         'flyFrom': 'PRG',
         'to': 'LGW',
-        'dateFrom': '26/05/2017',  # arrow.utcnow().replace(day=10).format('DD/MM/YYYY'),
-        'dateTo': '5/06/2017',  # arrow.utcnow().replace(day=20).format('DD/MM/YYYY'),
+        'dateFrom': arrow.utcnow().format('DD/MM/YYYY'),
+        'dateTo': arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
         'partner': 'picky'
     }
-    # res1 = s.search_flights(params=prg_to_lgw)
-    v = {"requests": [
-        {"v": 2, "sort": "duration", "asc": 1, "locale": "en", "daysInDestinationFrom": "", "daysInDestinationTo": "",
-         "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BRQ", "to": "BCN", "featureName": "results",
-         "dateFrom": "09/05/2017", "dateTo": "09/06/2017", "typeFlight": "oneway", "returnFrom": "", "returnTo": "",
-         "one_per_date": 0, "oneforcity": 0, "wait_for_refresh": 0, "adults": 1},
-        {"v": 2, "sort": "duration", "asc": 1, "locale": "en", "daysInDestinationFrom": "", "daysInDestinationTo": "",
-         "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BCN", "to": "ZAG", "featureName": "results",
-         "dateFrom": "12/06/2017", "dateTo": "15/06/2017", "typeFlight": "oneway", "returnFrom": "", "returnTo": "",
-         "one_per_date": 0, "oneforcity": 0, "wait_for_refresh": 0, "adults": 1}], "limit": 45}
-    # res2 = s.search_flights_multi(json_data=v)
-    # print(parseString(res1).toprettyxml())
-    # pprint.pprint(res2.json())
-    pprint.pprint(res.json())
+    # res1 = s.search_flights(flyFrom='PRG', to='LGW', dateFrom=arrow.utcnow().format('DD/MM/YYYY'),
+    #                         dateTo=arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'), partner='picky')
+    # res1 = s.search_flights(params_payload=prg_to_lgw)
+    # pprint(res1.url)
+
+    date_from_1 = arrow.utcnow().format('DD/MM/YYYY')
+    date_to_1 = arrow.utcnow().shift(weeks=+1).format('DD/MM/YYYY')
+    date_from_2 = arrow.utcnow().shift(weeks=+2).format('DD/MM/YYYY')
+    date_to_2 = arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY')
+    payload = {
+        "requests": [
+            {"to": "AMS", "flyFrom": "PRG", "directFlights": 0, "dateFrom": date_from_1, date_to_1: "28/06/2017"},
+            {"to": "OSL", "flyFrom": "AMS", "directFlights": 0, "dateFrom": date_from_2, date_to_2: "11/07/2017"}
+        ]}
+    # res2 = s.search_flights_multi(json_data=payload)
+    # pprint(res2.json())

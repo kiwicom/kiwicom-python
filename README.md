@@ -9,33 +9,58 @@ To use this module, firstly, you should create an a config file `.env` and put i
     API_SEARCH='API_SEARCH_HOST'
     API_BOOKING='API_BOOKING_HOST'
 Where `API_SEARCH_HOST` and `API_BOOKING_HOST` is Search and Booking API URLs
+
 Then, create an object
 
+    import kiwi
+
     s = Search()
-##### Search places:
+##### SEARCH PLACES:
 
     res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi')
-##### Search flights:
+Also, you can send this parameters in payload:
 
-    res = s.search_flights(fly_from='CZ', date_from='26/05/2017', date_to='5/06/2017', partner_market='US')
-##### Search flights_multi:
+    payload = {
+        'id': 'SK',
+        'term': 'br',
+        'bounds': 'lat_lo,lat_hi',
+        'locale': 'cs'
+    }
+
+    res = s.search_places(params_payload=payload)
+##### SEARCH FLIGHTS:
+
+    res = s.search_flights(flyFrom='CZ', dateFrom='26/05/2017', dateTo='5/06/2017', partner='picky')
+Also, you can send this parameters in payload:
+
+    import arrow
+
+    payload = {
+        'flyFrom': 'PRG',
+        'to': 'LGW',
+        'dateFrom': arrow.utcnow().format('DD/MM/YYYY'),
+        'dateTo': arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
+        'partner': 'picky'
+    }
+
+    res = s.search_flights(params_payload=payload)
+
+
+##### SEARCH FLIGHTS MULTI:
 Firstly, you should create payload
 
-    payload = {"requests": [
-        {"v": 2, "sort": "duration", "asc": 1, "locale": "en", "daysInDestinationFrom": "", "daysInDestinationTo": "",
-         "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BRQ", "to": "BCN", "featureName": "results",
-         "dateFrom": "09/05/2017", "dateTo": "09/06/2017", "typeFlight": "oneway", "returnFrom": "", "returnTo": "",
-         "one_per_date": 0, "oneforcity": 0, "wait_for_refresh": 0, "adults": 1},
-        {"v": 2, "sort": "duration", "asc": 1, "locale": "en", "daysInDestinationFrom": "", "daysInDestinationTo": "",
-         "affilid": "picky", "children": 0, "infants": 0, "flyFrom": "BCN", "to": "ZAG", "featureName": "results",
-         "dateFrom": "12/06/2017", "dateTo": "15/06/2017", "typeFlight": "oneway", "returnFrom": "", "returnTo": "",
-         "one_per_date": 0, "oneforcity": 0, "wait_for_refresh": 0, "adults": 1}], "limit": 45}
+    payload = {
+        "requests": [
+            {"to": "AMS", "flyFrom": "PRG", "directFlights": 0, "dateFrom": "11/06/2017", "dateTo": "28/06/2017"},
+            {"to": "OSL", "flyFrom": "AMS", "directFlights": 0, "dateFrom": "01/07/2017", "dateTo": "11/07/2017"}
+        ]}
 
 Then use it in search_flights_multi method
 
     res = s.search_flights_multi(json_data=payload)
 ***
 All search methods accept `request_args` as an argument to send some extra parameters to request directly
+
 (For more information about request args read [requests documentation](http://docs.python-requests.org/en/master))
 
 If you want to add some extra params to request like **Headers** you should create some dictionary like:

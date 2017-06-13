@@ -1,8 +1,6 @@
-import datetime
 import logging
-import sys
 import os
-import io
+import datetime
 
 from structlog import get_logger
 from structlog import configure
@@ -10,11 +8,12 @@ from structlog import processors
 from structlog import stdlib
 import requests
 from pythonjsonlogger import jsonlogger
+import arrow
 
 import settings
 
 
-def configure_logger(log_level='DEBUG', log_file='logs.log'):
+def configure_logger(log_level='WARNING', log_file='logs.log'):
     lvl = getattr(logging, log_level.upper())
     configure(
         processors=[
@@ -41,6 +40,7 @@ def configure_logger(log_level='DEBUG', log_file='logs.log'):
     logger.addHandler(handler)
     return logger
 
+
 log = configure_logger()
 
 
@@ -57,31 +57,21 @@ class Kiwicom(object):
     Parent class for initialisation
     """
     _TIME_ZONES = 'gmt'
+    API_HOST = {
+        'search': os.environ.get('API_SEARCH'),
+        'booking': '{0}/api/v0.1'.format(os.environ.get('API_BOOKING')),
+    }
 
     def __init__(self, time_zone='gmt'):
-        """ 
-        :param time_zone: 
-        """
         if time_zone.lower() not in self._TIME_ZONES:
             raise ValueError(
                 'Unknown time zone: {}, '
                 'supported time zones are {}'.format(time_zone, self._TIME_ZONES)
             )
         self.time_zone = time_zone.lower()
-        self.API_HOSTS = (os.environ.get("API_SEARCH"), os.environ.get("API_BOOKING"))
 
     def make_request(self, service_url, params, method='get', callback=None,
                      data=None, json_data=None, request_args=None):
-        """
-        :param request_args: 
-        :param json_data:  
-        :param service_url: 
-        :param method:  
-        :param data: 
-        :param callback: 
-        :param params: 
-        :return: 
-        """
         if callback is None:
             callback = self._default_callback
 
@@ -89,7 +79,6 @@ class Kiwicom(object):
                   params=params, request_args=request_args)
 
         request = getattr(requests, method.lower())
-
         try:
             r = request(service_url, params=params, data=data, json=json_data, **request_args)
         except TypeError as err:
@@ -102,12 +91,6 @@ class Kiwicom(object):
             return callback(r)
         except Exception as e:
             return self._error_handling(r, e)
-
-    @staticmethod
-    def _params_maker(params, req_params=None):
-        for (key, value) in params.items():
-            req_params[key] = value
-        return req_params
 
     @staticmethod
     def _error_handling(response, error):
@@ -133,26 +116,65 @@ class Kiwicom(object):
             raise EmptyResponse('Response has no content.')
         return response
 
-    def _params_checker(self, params, params_payload, service_url, request_args):
+    def _validate_params(self, params, params_payload, service_url, request_args):
         if params and params_payload:
             raise UnexpectedParameter(
                 'Params and params_payload were taken, only one can be'
             )
-        elif params_payload and not params:
-            return self.make_request(service_url,
-                                     params=params_payload,
-                                     request_args=request_args)
         else:
             return self.make_request(service_url,
-                                     params=params,
+                                     params=params or params_payload,
                                      request_args=request_args)
+
+    # @staticmethod
+    # def _default_params(params, **req_params):
+    #     # if params_payload:
+    #     #     params_dict = params_payload.copy()
+    #     # else:
+    #     #     params_dict = params.copy()
+    #
+    #     for (key, value) in req_params.items():
+    #         # if key not in (params or params_payload):
+    #         if key not in params:
+    #             params[key] = value
+    #     return params
+
+    @staticmethod
+    def _validate_date(date):
+        try:
+            datetime.datetime.strptime(str(date), '%Y-%m-%d')
+            return True
+        except ValueError:
+            return False
+
+    def _reformat_date(self, params):
+        for (key, value) in params.items():
+
+            if key == ('dateFrom' or 'dateTo'):
+                dtemp = params[key]
+                if isinstance(params[key], datetime.date):
+                    params[key] = datetime.date.strftime(dtemp, "%d/%m/%Y")
+                if self._validate_date(dtemp) and isinstance(dtemp, str):
+                    a = arrow.get(dtemp, 'YYYY-MM-DD').date()
+                    params[key] = datetime.date.strftime(a, "%d/%m/%Y")
+
+            if key == 'requests':
+                for item in params['requests']:
+                    for (k, v) in item.items():
+                        if k == ('dateFrom' or 'dateTo'):
+                            dtemp = item[k]
+                            if isinstance(item[k], datetime.date):
+                                item[k] = datetime.date.strftime(dtemp, "%d/%m/%Y")
+                            if self._validate_date(dtemp) and isinstance(dtemp, str):
+                                a = arrow.get(dtemp, 'YYYY-MM-DD').date()
+                                item[k] = datetime.date.strftime(a, "%d/%m/%Y")
+        return params
 
 
 class Search(Kiwicom):
     """
     Search Class
     """
-
     def search_places(self, params_payload=None, request_args=None, **params):
         """
         Get request with parameters
@@ -169,65 +191,46 @@ class Search(Kiwicom):
         :param params_payload: takes payload with params
         :return: Json of skypicker api ids
         """
-        service_url = "{API_HOST}/places".format(API_HOST=self.API_HOSTS[0])
-        return self._params_checker(params=params,
-                                    params_payload=params_payload,
-                                    service_url=service_url,
-                                    request_args=request_args)
+        # if params and 'zoom_level_threshold' in params:
+        #     v = params.pop('zoom_level_threshold')
+        #     new_dict = {'zoomLevelThreshold': v}
+        #     params.update(new_dict)
+        # if params_payload and 'zoom_level_threshold' in params_payload:
+        #     v = params_payload.pop('zoom_level_threshold')
+        #     new_dict = {'zoomLevelThreshold': v}
+        #     params_payload.update(new_dict)
 
-    def search_flights(self, request_args=None, params_payload=None, **params):
+        service_url = "{API_HOST}/places".format(API_HOST=self.API_HOST['search'])
+        return self._validate_params(params=params,
+                                     params_payload=params_payload,
+                                     service_url=service_url,
+                                     request_args=request_args)
+
+    def search_flights(self, params_payload=None, request_args=None, **params):
         """  
         :param params_payload:
-        :param request_args:  
-        :param fly_from: Skypicker api id of the departure destination. 
-                Accepts multiple values separated by comma, 
-                these values might be airport codes, city IDs, two letter country codes, 
-                metropolitan codes and radiuses. Radius needs to be in form lat-lon-xkm. 
-                E.g. -23.24--47.86-500km for places around Sao Paulo, LON - checks every airport in London, 
-                LHR - checks flights from London Heathrow, UK - flights from United Kingdom 
-                Example: CZ.
-                [String]
-        :param partner_market: Market from which the request is coming from. 
-                Example: us.
-                [String]
-        :param date_from: search flights from this date (dd/mm/YYYY). 
-                Use parameters dateFrom and dateTo as a date range 
-                for the flight departure. Parameter dateFrom 01/05/2016 and dateTo 30/05/2016 means, 
-                that the departure can be anytime between those dates. For the dates of the return flights, 
-                use the returnTo&returnFrom or daysInDestinationFrom & daysInDestinationTo parameters 
-                Example: 08/08/2017.
-                [String]
-        :param date_to: search flights until this date (dd/mm/YYYY) 
-                Example: 08/09/2017.
-                [String]
-        :param partner: partner ID. 
-                If present, in the result will be also a link to a specific trip directly 
-                to kiwi.com, with the affiliate id included (use picky partner ID for testing) 
-                Example: picky.
-                [String]
+        :param request_args:
         :param params: all other extra params
         :return: response with JSON or XML content
         """
-        service_url = "{API_HOST}/flights".format(API_HOST=self.API_HOSTS[0])
-        return self._params_checker(params=params,
-                                    params_payload=params_payload,
-                                    service_url=service_url,
-                                    request_args=request_args)
+        if params:
+            params.update(self._reformat_date(params))
+        if params_payload:
+            params_payload.update(self._reformat_date(params_payload))
+
+        service_url = "{API_HOST}/flights".format(API_HOST=self.API_HOST['search'])
+        return self._validate_params(params=params,
+                                     params_payload=params_payload,
+                                     service_url=service_url,
+                                     request_args=request_args)
 
     def search_flights_multi(self, json_data=None, data=None, request_args=None, **params):
-        """
-        
-        :param request_args: 
-        :param json_data: 
-        :param data: 
-        :param params:
-        :required_data: 
-        (
-            affilid: Your partner ID, for testing use 'picky'
-        )
-        :return: 
-        """
-        service_url = "{API_HOST}/flights_multi".format(API_HOST=self.API_HOSTS[0])
+        if json_data:
+            json_data.update(self._reformat_date(json_data))
+        if data:
+            data.update(self._reformat_date(data))
+
+        service_url = "{API_HOST}/flights_multi".format(API_HOST=self.API_HOST['search'])
         return self.make_request(service_url,
                                  params=params,
                                  method='post',
@@ -240,43 +243,138 @@ class Booking(Kiwicom):
     """
     Booking Class
     """
-    def __init__(self, api_key, time_zone='gmt'):
-        super().__init__(time_zone)
-        self.api_key = api_key
+    def check_flights(self, params_payload=None, request_args=None, **params):
+        # p, pp = self._default_params(params,
+        #                              params_payload,
+        #                              v=2,
+        #                              affily='otto_{market}')
+        # if params:
+        #     params.update(p)
+        # if params_payload:
+        #     params_payload.update(pp)
+
+        service_url = "{API_HOST}/check_flights".format(API_HOST=self.API_HOST['booking'])
+        return self._validate_params(params=params,
+                                     params_payload=params_payload,
+                                     service_url=service_url,
+                                     request_args=request_args)
+
+    def save_booking(self, json_data=None, data=None, request_args=None, **params):
+        service_url = "{API_HOST}/save_booking".format(API_HOST=self.API_HOST['booking'])
+        return self.make_request(service_url,
+                                 params=params,
+                                 method='post',
+                                 json_data=json_data,
+                                 data=data,
+                                 request_args=request_args)
+
+    def confirm_payment(self, json_data=None, data=None, request_args=None, *params):
+        service_url = "{API_HOST}/confirm_payment".format(API_HOST=self.API_HOST['booking'])
+        return self.make_request(service_url,
+                                 params=params,
+                                 method='post',
+                                 json_data=json_data,
+                                 data=data,
+                                 request_args=request_args)
 
 
 if __name__ == '__main__':
     from pprint import pprint
-    import arrow
+
+    logging.basicConfig(level='DEBUG')
+
     s = Search()
-    payload = {
+    payload_place = {
         'id': 'SK',
         'term': 'br',
         'bounds': 'lat_lo,lat_hi',
-        'locale': 'cs'
+        'locale': 'cs',
+        'zoom_level_threshold': 7
     }
-    # res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi', locale='cs')
-    res = s.search_places(params_payload=payload)
-    prg_to_lgw = {
-        'flyFrom': 'PRG',
-        'to': 'LGW',
+    payload_flights = {
+        'flyFrom': 'LGW',
+        'to': 'PRG',
         'dateFrom': arrow.utcnow().format('DD/MM/YYYY'),
         'dateTo': arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
         'partner': 'picky'
     }
-    # res1 = s.search_flights(flyFrom='PRG', to='LGW', dateFrom=arrow.utcnow().format('DD/MM/YYYY'),
-    #                         dateTo=arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'), partner='picky')
-    # res1 = s.search_flights(params_payload=prg_to_lgw)
-    # pprint(res1.url)
-
-    date_from_1 = arrow.utcnow().format('DD/MM/YYYY')
-    date_to_1 = arrow.utcnow().shift(weeks=+1).format('DD/MM/YYYY')
-    date_from_2 = arrow.utcnow().shift(weeks=+2).format('DD/MM/YYYY')
-    date_to_2 = arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY')
-    payload = {
+    prg_to_lgw = {
+        'flyFrom': 'PRG',
+        'to': 'LGW',
+        'dateFrom': '13/07/2017',
+        'dateTo': '19/07/2017',
+        'partner': 'picky'
+    }
+    payload_flights_multi = {
         "requests": [
-            {"to": "AMS", "flyFrom": "PRG", "directFlights": 0, "dateFrom": date_from_1, date_to_1: "28/06/2017"},
-            {"to": "OSL", "flyFrom": "AMS", "directFlights": 0, "dateFrom": date_from_2, date_to_2: "11/07/2017"}
-        ]}
-    # res2 = s.search_flights_multi(json_data=payload)
-    # pprint(res2.json())
+            {
+                "to": "AMS",
+                "flyFrom": "PRG",
+                "directFlights": 0,
+                "dateFrom": datetime.date.today(),
+                "dateTo": arrow.utcnow().shift(weeks=+1).format('DD/MM/YYYY'),
+            },
+            {
+                "to": "OSL",
+                "flyFrom": "AMS",
+                "directFlights": 0,
+                "dateFrom": arrow.utcnow().shift(weeks=+2).format('DD/MM/YYYY'),
+                "dateTo": arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
+            }
+
+        ]
+    }
+
+    # pprint(s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi', locale='cs', zoom_level_threshold=7).url)
+    # pprint(s.search_places(params_payload=payload).url)
+
+    d = str(datetime.date(2017, 7, 11))
+    pprint(s.search_flights(to='LGW', dateFrom=datetime.date.today()))
+    pprint(s.search_flights(to='LGW', dateFrom='2017-06-18'))
+    pprint(s.search_flights(to='LGW'))
+    pprint(s.search_flights(params_payload=payload_flights))
+
+    pprint(s.search_flights_multi(json_data=payload_flights_multi))
+
+    b = Booking()
+    check_payload = {
+        'v': 2,
+        'booking_token': s.search_flights(params_payload=prg_to_lgw).json()['data'][0]['booking_token'],
+        'pnum': 1,
+        'bnum': 0,
+        'affily': 'otto_{market}',
+        'currency': 'USD',
+        'visitor_uniqid': '90a12afc-e240-11e6-bf01-fe55135034f3',
+    }
+    save_book_payload = {
+        "lang": "en",
+        "bags": 0,
+        "passengers": [
+            {
+                'surname': 'test',
+                'name': 'test dont book',
+                'title': 'mr',
+                'birthday': 631152000,
+                'nationality': 'cz',
+                'insurance': 'none',
+                'cardno': None,
+                'expiration': None,
+                'email': 'test@skypicker.com',
+                'phone': '+421902123456'
+            }
+        ],
+        'price': 00.0,
+        "currency": "czk",
+        'customerLoginID': 'unknown',
+        'customerLoginName': 'unknown',
+        "booking_token": b.check_flights(params_payload=check_payload).json()['booking_token'],
+        "affily": "sp_test",
+        'visitor_uniqid': '90a12afc-e240-11e6-bf01-fe55135034f3',
+        'payment_gateway': 'zooz',
+        'override_duplicate_booking_warning': True,
+        'immediate_confirmation': False,
+        'use_credits': False,
+    }
+
+    # pprint(b.check_flights(params_payload=check_payload).json())
+    # pprint(b.save_booking(json_data=save_book_payload).json())

@@ -1,21 +1,23 @@
-# Kiwi.com wrapper
-[Kiwi.com (Skypicker.com)](https://www.kiwi.com) API Wrapper
+# Kiwi.com Python Wrapper
+[Kiwi.com](https://www.kiwi.com) API Wrapper
 
-- For more information read [Kiwi.com documentation](http://docs.skypickerpublicapi.apiary.io)
+- API Documentaiton http://docs.skypickerpublicapi.apiary.io
 
-## Search module:
 To use this module, firstly, you should create an a config file `.env` and put it into root directory:
 
     API_SEARCH='API_SEARCH_HOST'
     API_BOOKING='API_BOOKING_HOST'
 Where `API_SEARCH_HOST` and `API_BOOKING_HOST` is Search and Booking API URLs
 
-Then, create an object
+## Search module:
+
+Create an object
 
     import kiwi
 
     s = Search()
-##### SEARCH PLACES:
+### search_places:
+
 
     res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi')
 Also, you can send this parameters in payload:
@@ -24,11 +26,12 @@ Also, you can send this parameters in payload:
         'id': 'SK',
         'term': 'br',
         'bounds': 'lat_lo,lat_hi',
-        'locale': 'cs'
+        'locale': 'cs',
+        'zoomLevelThreshold': 7
     }
 
     res = s.search_places(params_payload=payload)
-##### SEARCH FLIGHTS:
+### search_flights:
 
     res = s.search_flights(flyFrom='CZ', dateFrom='26/05/2017', dateTo='5/06/2017', partner='picky')
 Also, you can send this parameters in payload:
@@ -36,17 +39,17 @@ Also, you can send this parameters in payload:
     import arrow
 
     payload = {
-        'flyFrom': 'PRG',
+        'flyFrom': 'PRG', # default value is 'PRG'
         'to': 'LGW',
         'dateFrom': arrow.utcnow().format('DD/MM/YYYY'),
         'dateTo': arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
-        'partner': 'picky'
+        'partner': 'picky' # default value is 'picky' use it for testing
     }
 
     res = s.search_flights(params_payload=payload)
 
-
-##### SEARCH FLIGHTS MULTI:
+You can use `datetime.date` for `dateFrom` adn `dateTo` parameters
+### search_flights_multi:
 Firstly, you should create payload
 
     payload = {
@@ -66,7 +69,7 @@ All search methods accept `request_args` as an argument to send some extra param
 If you want to add some extra params to request like **Headers** you should create some dictionary like:
 
     request_args = {
-        'headers': {'Content-type': 'application/xml'}
+        'headers': {'some-header': 'some-headers'}
     }
 
 And add it to some search method as an argument
@@ -75,8 +78,24 @@ And add it to some search method as an argument
 
 For parsing use `res.json()`
 
-Also you can configure logger(alpha)
+# Booking module:
+    import kiwi
 
-    configure_logger(log_level='debug')
+    b = Booking()
+## check_flights:
+    booking_token = s.search_flights(params_payload=prg_to_lgw).json()['data'][0]['booking_token']
+    check_payload = {
+            'v': 2,
+            'booking_token': booking_token,
+            'pnum': 1,
+            'bnum': 0,
+            'affily': 'otto_{market}',
+            'currency': 'USD',
+            'visitor_uniqid': '90a12afc-e240-11e6-bf01-fe55135034f3',
+        }
+
+    res = b.check_flights(params_payload=check_payload)
+## save_booking:
+## confirm_payment:
 
 ### API WRAPPER IN PROGRESS...

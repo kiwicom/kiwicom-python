@@ -1,11 +1,8 @@
-from kiwiwrapper.kiwi import Search
+from kiwicom.kiwi import Search
 import cerberus
 import arrow
-import os
 import requests
-
-
-API_HOST = api_host = '{0}'.format(os.environ.get("API_SEARCH"))
+from random import randint
 
 
 class TestUrl(object):
@@ -19,7 +16,7 @@ class TestUrl(object):
         }
 
         s = Search()
-        api_res = requests.get('{0}/places'.format(API_HOST), params=payload)
+        api_res = requests.get('{0}/places'.format(s.API_HOST['search']), params=payload)
         res = s.search_places(params_payload=payload)
         assert res.url == api_res.url
 
@@ -33,7 +30,7 @@ class TestUrl(object):
         }
 
         s = Search()
-        api_res = requests.get('{0}/flights'.format(API_HOST), params=payload)
+        api_res = requests.get('{0}/flights'.format(s.API_HOST['search']), params=payload)
         res = s.search_flights(params_payload=payload)
         assert res.url == api_res.url
 
@@ -94,10 +91,10 @@ class TestApiResp(object):
 
         v = cerberus.Validator(schema)
         s = Search()
-
+        rand_from = randint(10, 50)
         res = s.search_flights(flyFrom='PRG',
                                dateFrom=arrow.utcnow().format('DD/MM/YYYY'),
-                               dateTo=arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
+                               dateTo=arrow.utcnow().shift(days=+rand_from).format('DD/MM/YYYY'),
                                partner='picky')
 
         v.allow_unknown = True
@@ -121,15 +118,15 @@ class TestApiResp(object):
                     "to": "AMS",
                     "flyFrom": "PRG",
                     "directFlights": 0,
-                    "dateFrom": arrow.utcnow().format('DD/MM/YYYY'),
-                    "dateTo": arrow.utcnow().shift(weeks=+1).format('DD/MM/YYYY'),
+                    "dateFrom": arrow.utcnow().shift(days=+randint(0, 5)).format('DD/MM/YYYY'),
+                    "dateTo": arrow.utcnow().shift(days=+randint(6, 11)).format('DD/MM/YYYY'),
                 },
                 {
                     "to": "OSL",
                     "flyFrom": "AMS",
                     "directFlights": 0,
-                    "dateFrom": arrow.utcnow().shift(weeks=+2).format('DD/MM/YYYY'),
-                    "dateTo": arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
+                    "dateFrom": arrow.utcnow().shift(days=+randint(12, 17)).format('DD/MM/YYYY'),
+                    "dateTo": arrow.utcnow().shift(days=+randint(18, 23)).format('DD/MM/YYYY'),
                 }
 
             ]

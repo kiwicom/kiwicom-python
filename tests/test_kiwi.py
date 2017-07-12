@@ -3,6 +3,7 @@ import cerberus
 import arrow
 import requests
 from random import randint
+from urllib.parse import urljoin
 
 
 class TestUrl(object):
@@ -16,7 +17,8 @@ class TestUrl(object):
         }
 
         s = Search()
-        api_res = requests.get('{0}/places'.format(s.API_HOST['search']), params=payload)
+        service_url = urljoin(s.API_HOST['search'], 'places')
+        api_res = requests.get(service_url, params=payload)
         res = s.search_places(params_payload=payload)
         assert res.url == api_res.url
 
@@ -30,7 +32,8 @@ class TestUrl(object):
         }
 
         s = Search()
-        api_res = requests.get('{0}/flights'.format(s.API_HOST['search']), params=payload)
+        service_url = urljoin(s.API_HOST['search'], 'flights')
+        api_res = requests.get(service_url, params=payload)
         res = s.search_flights(params_payload=payload)
         assert res.url == api_res.url
 

@@ -1,7 +1,9 @@
 # Kiwi.com Python Wrapper
 [Kiwi.com](https://www.kiwi.com) API Wrapper
 
-- API Documentaiton http://docs.skypickerpublicapi.apiary.io
+- Search API Documentaiton http://docs.skypickerpublicapi.apiary.io
+- Booking API Documentaiton http://docs.skypickerbookingapi1.apiary.io
+- Location API Documentaiton http://docs.locations10.apiary.io/
 
 # Search module:
 
@@ -10,8 +12,8 @@ Create an object
     from kiwicom import kiwi
 
     s = kiwi.Search()
-## search_places:
 
+## search_places:
 
     res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi')
 Also, you can send this parameters in payload:
@@ -25,6 +27,7 @@ Also, you can send this parameters in payload:
     }
 
     res = s.search_places(params_payload=payload)
+
 ## search_flights:
 
     res = s.search_flights(flyFrom='CZ', dateFrom='26/05/2017', dateTo='5/06/2017', partner='picky')
@@ -43,6 +46,7 @@ Also, you can send this parameters in payload:
     res = s.search_flights(params_payload=payload)
 
 You can use `datetime.date` for `dateFrom` and `dateTo` parameters
+
 ## search_flights_multi:
 Put payload into method
 
@@ -58,6 +62,7 @@ Put payload into method
     import kiwi
 
     b = Booking()
+
 ## check_flights:
     booking_token = s.search_flights(params_payload=payload).json()['data'][0]['booking_token']
     check_payload = {
@@ -71,10 +76,21 @@ Put payload into method
         }
 
     res = b.check_flights(params_payload=check_payload)
+
 ## save_booking:
     b.save_booking(json_data=save_book_payload)
+
 ## pay_via_zooz
+    pay_via_zooz()  # only sandbox mode
+
 ## confirm_payment:
+    confirm_payment()
+
+# Location module:
+
+## get_location:
+    get_location()
+
 ---
 All methods accept `request_args` as an argument to send some extra parameters to request directly
 

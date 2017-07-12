@@ -7,7 +7,6 @@ from structlog import (
 )
 import requests
 from pythonjsonlogger import jsonlogger
-import arrow
 
 
 def configure_logger(log_level='WARNING', log_file='kiwicom_wrap.log'):
@@ -56,16 +55,19 @@ class Kiwicom(object):
     API_HOST = {
         'search': 'https://api.skypicker.com',
         'booking': 'https://booking-api.skypicker.com/api/v0.1',
-        'zooz_sandbox': 'https://sandbox.zooz.co/mobile/ZooZClientPaymentAPI'
+        'location': 'https://locations.skypicker.com',
+        'zooz_sandbox': 'https://sandbox.zooz.co/mobile/ZooZPaymentAPI',
+        'zooz': 'Need to add'
     }
 
-    def __init__(self, time_zone='gmt'):
+    def __init__(self, time_zone='gmt', sandbox=True):
         if time_zone.lower() not in self._TIME_ZONES:
             raise ValueError(
                 'Unknown time zone: {}, '
                 'supported time zones are {}'.format(time_zone, self._TIME_ZONES)
             )
         self.time_zone = time_zone.lower()
+        self.sandbox = sandbox
 
     def make_request(self, service_url, params, method='get', callback=None,
                      data=None, json_data=None, request_args=None, headers=None):
@@ -135,34 +137,33 @@ class Kiwicom(object):
         return params
 
     @staticmethod
-    def _validate_date(date):
+    def _validate_date(dt):
         try:
-            datetime.datetime.strptime(str(date), '%Y-%m-%d')
+            datetime.datetime.strptime(str(dt), '%Y-%m-%d')
             return True
         except ValueError:
             return False
 
     def _reformat_date(self, params):
-        for (key, value) in params.items():
+        # Need to correct
+        if 'requests' in params.keys():
+            for item in params['requests']:
+                for (k, v) in item.items():
+                    if k in ('dateFrom', 'dateTo'):
+                        if isinstance(v, datetime.date):
+                            item[k] = datetime.date.strftime(v, "%d/%m/%Y")
+                        elif self._validate_date(v):
+                            item[k] = datetime.datetime.strptime(v, "%Y-%m-%d")\
+                                .strftime("%d/%m/%Y")
+        else:
+            for (k, v) in params.items():
+                if k in ('dateFrom', 'dateTo'):
+                    if isinstance(v, datetime.date):
+                        params[k] = datetime.date.strftime(v, "%d/%m/%Y")
+                    elif self._validate_date(v):
+                        params[k] = datetime.datetime.strptime(v, "%Y-%m-%d")\
+                            .strftime("%d/%m/%Y")
 
-            if key == ('dateFrom' or 'dateTo'):
-                dtemp = params[key]
-                if isinstance(params[key], datetime.date):
-                    params[key] = datetime.date.strftime(dtemp, "%d/%m/%Y")
-                if self._validate_date(dtemp) and isinstance(dtemp, str):
-                    a = arrow.get(dtemp, 'YYYY-MM-DD').date()
-                    params[key] = datetime.date.strftime(a, "%d/%m/%Y")
-
-            if key == 'requests':
-                for item in params['requests']:
-                    for (k, v) in item.items():
-                        if k == ('dateFrom' or 'dateTo'):
-                            dtemp = item[k]
-                            if isinstance(item[k], datetime.date):
-                                item[k] = datetime.date.strftime(dtemp, "%d/%m/%Y")
-                            if self._validate_date(dtemp) and isinstance(dtemp, str):
-                                a = arrow.get(dtemp, 'YYYY-MM-DD').date()
-                                item[k] = datetime.date.strftime(a, "%d/%m/%Y")
         return params
 
 
@@ -202,12 +203,9 @@ class Search(Kiwicom):
         #     'flyFrom': 'PRG',
         #     'dateFrom': a,
         # }
-
         if params:
-            # self._default_params(params, req_params)
             self._reformat_date(params)
         elif params_payload:
-            # self._default_params(params_payload, req_params)
             self._reformat_date(params_payload)
         # else:
         #     params = {}
@@ -223,7 +221,7 @@ class Search(Kiwicom):
     def search_flights_multi(self, json_data=None, data=None,
                              headers=None, request_args=None, **params):
         """
-        sending post request
+        Sending post request
         :param json_data: takes post data dict
         :param data: takes json formatted data
         :param headers: headres
@@ -272,7 +270,7 @@ class Booking(Kiwicom):
 
     def pay_via_zooz(self, json_data=None, data=None, headers=None,
                      request_args=None, **params):
-        service_url = self.API_HOST['zooz_sandbox']
+        service_url = self.API_HOST['zooz_sandbox'] if self.sandbox else self.API_HOST['zooz']
         return self.make_request(service_url,
                                  params=params,
                                  method='post',
@@ -291,3 +289,14 @@ class Booking(Kiwicom):
                                  data=data,
                                  headers=headers,
                                  request_args=request_args)
+
+
+class Location(Kiwicom):
+    def get_location(self, params_payload=None, headers=None,
+                     request_args=None, **params):
+        service_url = self.API_HOST['location']
+        return self._validate_params(service_url,
+                                     params_payload=params_payload,
+                                     headers=headers,
+                                     request_args=request_args,
+                                     params=params)

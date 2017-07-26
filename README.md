@@ -3,7 +3,7 @@
 
 - Search API Documentaiton http://docs.skypickerpublicapi.apiary.io
 - Booking API Documentaiton http://docs.skypickerbookingapi1.apiary.io
-- Location API Documentaiton http://docs.locations10.apiary.io/
+- Locations API Documentaiton http://docs.locations10.apiary.io/
 
 # Search module:
 

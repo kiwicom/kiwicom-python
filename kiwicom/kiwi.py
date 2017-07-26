@@ -10,36 +10,6 @@ import requests
 from pythonjsonlogger import jsonlogger
 
 
-def configure_logger(log_level='WARNING', log_file='kiwicom_wrap.log'):
-    lvl = getattr(logging, log_level.upper())
-    configure(
-        processors=[
-            stdlib.filter_by_level,
-            stdlib.add_logger_name,
-            stdlib.add_log_level,
-            stdlib.PositionalArgumentsFormatter(),
-            processors.StackInfoRenderer(),
-            processors.format_exc_info,
-            processors.UnicodeDecoder(),
-            stdlib.render_to_log_kwargs,
-        ],
-        context_class=dict,
-        logger_factory=stdlib.LoggerFactory(),
-        wrapper_class=stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
-    handler = logging.FileHandler(filename=log_file)
-    handler.setFormatter(jsonlogger.JsonFormatter(
-        '%(asctime)s %(filename)s %(lineno)d %(message)s'
-    ))
-    logger = get_logger(__name__)
-    logger.setLevel(lvl)
-    logger.addHandler(handler)
-    return logger
-
-log = configure_logger()
-
-
 class UnexpectedParameter(KeyError):
     pass
 
@@ -48,16 +18,51 @@ class EmptyResponse(Exception):
     pass
 
 
+class Logger(object):
+    def __init__(self, log_level='WARNING', log_file='kiwicom_wrap.log'):
+        self.log_level = log_level
+        self.log_file = log_file
+        self.log = self.configure_logger()
+
+    def configure_logger(self):
+        lvl = getattr(logging, self.log_level.upper())
+        configure(
+            processors=[
+                stdlib.filter_by_level,
+                stdlib.add_logger_name,
+                stdlib.add_log_level,
+                stdlib.PositionalArgumentsFormatter(),
+                processors.StackInfoRenderer(),
+                processors.format_exc_info,
+                processors.UnicodeDecoder(),
+                stdlib.render_to_log_kwargs,
+            ],
+            context_class=dict,
+            logger_factory=stdlib.LoggerFactory(),
+            wrapper_class=stdlib.BoundLogger,
+            cache_logger_on_first_use=True,
+        )
+        handler = logging.FileHandler(filename=self.log_file)
+        handler.setFormatter(jsonlogger.JsonFormatter(
+            '%(asctime)s %(filename)s %(lineno)d %(message)s'
+        ))
+        logger = get_logger('kiwiwrap')
+        logger.propagate = False
+        logger.setLevel(lvl)
+        logger.addHandler(handler)
+        return logger
+
+
 class Kiwicom(object):
     """
     Parent class for initialisation
     """
     _TIME_ZONES = 'gmt'
     API_HOST = {
-        'search': 'https://api.skypicker.com',
-        'booking': 'https://booking-api.skypicker.com/api/v0.1',
-        'location': 'https://locations.skypicker.com',
-        'zooz_sandbox': 'https://sandbox.zooz.co/mobile/ZooZPaymentAPI',
+        'search': 'https://api.skypicker.com/',
+        'booking': 'https://booking-api.skypicker.com/api/v0.1/',
+        'location': 'https://locations.skypicker.com/',
+        'zooz_sandbox': 'https://sandbox.zooz.co/mobile/ZooZPaymentAPI/',
         'zooz': 'Need to add'
     }
 
@@ -69,33 +74,28 @@ class Kiwicom(object):
             )
         self.time_zone = time_zone.lower()
         self.sandbox = sandbox
+        self.log = get_logger('kiwiwrap')
 
-    def make_request(self, service_url, params, method='get', callback=None,
-                     data=None, json_data=None, request_args=None, headers=None):
-        if callback is None:
-            callback = self._default_callback
+    def make_request(self, service_url, method='get', data=None,
+                     json_data=None, request_args=None, headers=None, **params):
 
-        log.debug('Request', URL=service_url, method=method.upper(),
-                  params=params, request_args=request_args)
+        self.log.debug('Request', URL=service_url, method=method.upper(), params=params, request_args=request_args)
 
         request = getattr(requests, method.lower())
         try:
-            r = request(service_url, params=params, data=data, json=json_data,
-                        headers=headers, **request_args)
+            response = request(service_url, params=params, data=data, json=json_data, headers=headers, **request_args)
         except TypeError as err:
-            r = request(service_url, params=params, data=data, json=json_data,
-                        headers=headers)
-            if request_args is not None:
-                log.warning(err)
+            response = request(service_url, params=params, data=data, json=json_data, headers=headers)
+            if request_args:
+                self.log.warning(err, request_args=request_args)
 
         try:
-            r.raise_for_status()
-            return callback(r)
+            response.raise_for_status()
+            return response
         except Exception as e:
-            return self._error_handling(r, e)
+            return self._error_handling(response, e)
 
-    @staticmethod
-    def _error_handling(response, error):
+    def _error_handling(self, response, error):
         if isinstance(error, requests.HTTPError):
             if response.status_code == 400:
                 error = requests.HTTPError(
@@ -109,33 +109,12 @@ class Kiwicom(object):
                 )
             raise error
         else:
-            log.error(error)
+            self.log.error(error)
             return response
 
-    @staticmethod
-    def _default_callback(response):
-        if not response or not response.content:
-            raise EmptyResponse('Response has no content.')
-        return response
-
-    def _validate_params(self, service_url, params, params_payload,
-                         request_args, headers):
-        if params and params_payload:
-            raise UnexpectedParameter(
-                'Params and params_payload were taken, only one can be'
-            )
-        else:
-            return self.make_request(service_url,
-                                     params=params or params_payload,
-                                     headers=headers,
-                                     request_args=request_args)
-
-    @staticmethod
-    def _default_params(params, req_params):
-        for (key, value) in req_params.items():
-            if key not in params:
-                params[key] = value
-        return params
+    # @staticmethod
+    # def _make_request_params(params, req_params):
+    #     return {key: value for key, value in req_params.items() if key not in params.keys()}
 
     @staticmethod
     def _validate_date(dt):
@@ -146,25 +125,18 @@ class Kiwicom(object):
             return False
 
     def _reformat_date(self, params):
-        # Need to correct
-        if 'requests' in params.keys():
-            for item in params['requests']:
-                for (k, v) in item.items():
-                    if k in ('dateFrom', 'dateTo'):
-                        if isinstance(v, datetime.date):
-                            item[k] = datetime.date.strftime(v, "%d/%m/%Y")
-                        elif self._validate_date(v):
-                            item[k] = datetime.datetime.strptime(v, "%Y-%m-%d")\
-                                .strftime("%d/%m/%Y")
-        else:
-            for (k, v) in params.items():
-                if k in ('dateFrom', 'dateTo'):
-                    if isinstance(v, datetime.date):
-                        params[k] = datetime.date.strftime(v, "%d/%m/%Y")
-                    elif self._validate_date(v):
-                        params[k] = datetime.datetime.strptime(v, "%Y-%m-%d")\
-                            .strftime("%d/%m/%Y")
-
+        """
+        Reformatting datetime.datetime and YYYY-mm-dd to dd/mm/YYYY
+        :param params: takes dict with parameters
+        :return: dict with reformatted date
+        """
+        for (k, v) in params.items():
+            if k in ('dateFrom', 'dateTo'):
+                if isinstance(v, datetime.date):
+                    params[k] = datetime.date.strftime(v, "%d/%m/%Y")
+                elif self._validate_date(v):
+                    params[k] = datetime.datetime.strptime(v, "%Y-%m-%d")\
+                        .strftime("%d/%m/%Y")
         return params
 
 
@@ -172,55 +144,37 @@ class Search(Kiwicom):
     """
     Search Class
     """
-    def search_places(self, params_payload=None, headers=None,
-                      request_args=None, **params):
+    def search_places(self, headers=None, request_args=None, **params):
         """
         Get request with parameters
         :param headers: headers
         :param request_args: extra args to requests.get
         :param params: parameters for request
-        :param params_payload: takes payload with params for request
         :return: response
         """
         service_url = urljoin(self.API_HOST['search'], 'places')
-        return self._validate_params(service_url,
-                                     params=params,
-                                     params_payload=params_payload,
-                                     headers=headers,
-                                     request_args=request_args)
+        return self.make_request(service_url,
+                                 headers=headers,
+                                 request_args=request_args,
+                                 **params)
 
-    def search_flights(self, params_payload=None, headers=None,
-                       request_args=None, **params):
+    def search_flights(self, headers=None, request_args=None, **params):
         """  
         :param headers: headers
-        :param params_payload: takes payload with params for request
         :param request_args: extra args to requests.get
         :param params: parameters for request
         :return: response
         """
-        # rand_from = randint(10, 50)
-        # a = arrow.utcnow().shift(days=+rand_from).format('DD/MM/YYYY')
-        # req_params = {
-        #     'flyFrom': 'PRG',
-        #     'dateFrom': a,
-        # }
-        if params:
-            self._reformat_date(params)
-        elif params_payload:
-            self._reformat_date(params_payload)
-        # else:
-        #     params = {}
-        #     params.update(req_params)
+        # params.update(self._make_request_params(params, req_params))
+        self._reformat_date(params)
 
         service_url = urljoin(self.API_HOST['search'], 'flights')
-        return self._validate_params(service_url,
-                                     params_payload=params_payload,
-                                     params=params,
-                                     headers=headers,
-                                     request_args=request_args)
+        return self.make_request(service_url,
+                                 headers=headers,
+                                 request_args=request_args,
+                                 **params)
 
-    def search_flights_multi(self, json_data=None, data=None,
-                             headers=None, request_args=None, **params):
+    def search_flights_multi(self, json_data=None, data=None, headers=None, request_args=None, **params):
         """
         Sending post request
         :param json_data: takes post data dict
@@ -231,73 +185,68 @@ class Search(Kiwicom):
         :return: response
         """
         if json_data:
-            json_data.update(self._reformat_date(json_data))
+            for item in json_data['requests']:
+                json_data.update(self._reformat_date(item))
         if data:
-            data.update(self._reformat_date(data))
+            for item in data['requests']:
+                data.update(self._reformat_date(item))
 
         service_url = urljoin(self.API_HOST['search'], 'flights_multi')
         return self.make_request(service_url,
-                                 params=params,
                                  method='post',
                                  json_data=json_data,
                                  data=data,
                                  headers=headers,
-                                 request_args=request_args)
+                                 request_args=request_args,
+                                 **params)
 
 
 class Booking(Kiwicom):
     """
     Booking Class
     """
-    def check_flights(self, params_payload=None, headers=None,
-                      request_args=None, **params):
+    def check_flights(self, headers=None, request_args=None, **params):
         service_url = urljoin(self.API_HOST['booking'], 'check_flights')
-        return self._validate_params(service_url,
-                                     params_payload=params_payload,
-                                     headers=headers,
-                                     params=params,
-                                     request_args=request_args)
+        return self.make_request(service_url,
+                                 headers=headers,
+                                 request_args=request_args,
+                                 **params)
 
-    def save_booking(self, json_data=None, data=None, headers=None,
-                     request_args=None, **params):
+    def save_booking(self, json_data=None, data=None, headers=None, request_args=None, **params):
         service_url = urljoin(self.API_HOST['booking'], 'save_booking')
         return self.make_request(service_url,
-                                 params=params,
                                  method='post',
                                  json_data=json_data,
                                  data=data,
                                  headers=headers,
-                                 request_args=request_args)
+                                 request_args=request_args,
+                                 **params)
 
-    def pay_via_zooz(self, json_data=None, data=None, headers=None,
-                     request_args=None, **params):
+    def pay_via_zooz(self, json_data=None, data=None, headers=None, request_args=None, **params):
         service_url = self.API_HOST['zooz_sandbox'] if self.sandbox else self.API_HOST['zooz']
         return self.make_request(service_url,
-                                 params=params,
                                  method='post',
                                  json_data=json_data,
                                  data=data,
                                  headers=headers,
-                                 request_args=request_args)
+                                 request_args=request_args,
+                                 **params)
 
-    def confirm_payment(self, json_data=None, data=None, headers=None,
-                        request_args=None, *params):
+    def confirm_payment(self, json_data=None, data=None, headers=None, request_args=None, *params):
         service_url = urljoin(self.API_HOST['booking'], 'confirm_payment')
         return self.make_request(service_url,
-                                 params=params,
                                  method='post',
                                  json_data=json_data,
                                  data=data,
                                  headers=headers,
-                                 request_args=request_args)
+                                 request_args=request_args,
+                                 **params)
 
 
-class Location(Kiwicom):
-    def get_location(self, params_payload=None, headers=None,
-                     request_args=None, **params):
+class Locations(Kiwicom):
+    def get_locations(self, headers=None, request_args=None, **params):
         service_url = self.API_HOST['location']
-        return self._validate_params(service_url,
-                                     params_payload=params_payload,
-                                     headers=headers,
-                                     request_args=request_args,
-                                     params=params)
+        return self.make_request(service_url,
+                                 headers=headers,
+                                 request_args=request_args,
+                                 **params)

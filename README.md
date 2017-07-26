@@ -26,7 +26,7 @@ Also, you can send this parameters in payload:
         'zoomLevelThreshold': 7
     }
 
-    res = s.search_places(params_payload=payload)
+    res = s.search_places(**payload)
 
 ## search_flights:
 
@@ -43,7 +43,7 @@ Also, you can send this parameters in payload:
         'partner': 'picky' # default value is 'picky' use it for testing
     }
 
-    res = s.search_flights(params_payload=payload)
+    res = s.search_flights(**payload)
 
 You can use `datetime.date` for `dateFrom` and `dateTo` parameters
 
@@ -59,12 +59,12 @@ Put payload into method
     res = s.search_flights_multi(json_data=payload)
 
 # Booking module:
-    import kiwi
+    from kiwicom import kiwi
 
-    b = Booking()
+    b = kiwi.Booking()
 
 ## check_flights:
-    booking_token = s.search_flights(params_payload=payload).json()['data'][0]['booking_token']
+    booking_token = s.search_flights(**payload).json()['data'][0]['booking_token']
     check_payload = {
             'v': 2,
             'booking_token': booking_token,
@@ -75,7 +75,7 @@ Put payload into method
             'visitor_uniqid': '90a12afc-e240-11e6-bf01-fe55135034f3',
         }
 
-    res = b.check_flights(params_payload=check_payload)
+    res = b.check_flights(**check_payload)
 
 ## save_booking:
     b.save_booking(json_data=save_book_payload)
@@ -86,10 +86,10 @@ Put payload into method
 ## confirm_payment:
     confirm_payment()
 
-# Location module:
+# Locations module:
 
-## get_location:
-    get_location()
+## get_locations:
+    get_locations()
 
 ---
 All methods accept `request_args` as an argument to send some extra parameters to request directly
@@ -103,5 +103,9 @@ Also all methods accept `headers` as an argument
     }
 
     s.search_flights(parms_payload=payload, headers=headers)
+
+
+# Setup Logger
+    l = Logger(log_level='DEBUG', log_file='log.log')
 
 ### API WRAPPER IN PROGRESS...

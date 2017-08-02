@@ -1,13 +1,14 @@
 import logging
 import datetime
 from urllib.parse import urljoin
+from time import time
 
+import requests
 from structlog import (
     get_logger, configure,
-    processors, stdlib
+    processors, stdlib, DropEvent
 )
-import requests
-from pythonjsonlogger import jsonlogger
+import structlog_pretty
 
 
 class UnexpectedParameter(KeyError):
@@ -18,39 +19,40 @@ class EmptyResponse(Exception):
     pass
 
 
-class Logger(object):
-    def __init__(self, log_level='WARNING', log_file='kiwicom_wrap.log'):
-        self.log_level = log_level
-        self.log_file = log_file
-        self.log = self.configure_logger()
+def configure_structlog(log_level='WARNING', log_file='kiwicom_wrap.log'):
+    lvl = getattr(logging, log_level.upper())
+    configure(
+        processors=[
+            # _drop_debug_logs,
+            stdlib.add_log_level,
+            stdlib.PositionalArgumentsFormatter(),
+            _unix_timestamper,
+            structlog_pretty.NumericRounder(),
+            processors.format_exc_info,
+            processors.UnicodeDecoder(),
+            processors.JSONRenderer(),
+        ],
+        logger_factory=stdlib.LoggerFactory(),
+        wrapper_class=stdlib.BoundLogger,
+    )
+    handler = logging.FileHandler(filename=log_file)
+    logger = get_logger('kiwiwrap')
+    logger.setLevel(lvl)
+    logger.addHandler(handler)
+    return logger
 
-    def configure_logger(self):
-        lvl = getattr(logging, self.log_level.upper())
-        configure(
-            processors=[
-                stdlib.filter_by_level,
-                stdlib.add_logger_name,
-                stdlib.add_log_level,
-                stdlib.PositionalArgumentsFormatter(),
-                processors.StackInfoRenderer(),
-                processors.format_exc_info,
-                processors.UnicodeDecoder(),
-                stdlib.render_to_log_kwargs,
-            ],
-            context_class=dict,
-            logger_factory=stdlib.LoggerFactory(),
-            wrapper_class=stdlib.BoundLogger,
-            cache_logger_on_first_use=True,
-        )
-        handler = logging.FileHandler(filename=self.log_file)
-        handler.setFormatter(jsonlogger.JsonFormatter(
-            '%(asctime)s %(filename)s %(lineno)d %(message)s'
-        ))
-        logger = get_logger('kiwiwrap')
-        logger.propagate = False
-        logger.setLevel(lvl)
-        logger.addHandler(handler)
-        return logger
+
+def _unix_timestamper(_, __, event_dict):
+    """Add a ``timestamp`` key to the event dict with the current Unix time."""
+    event_dict['timestamp'] = time()
+    return event_dict
+
+
+def _drop_debug_logs(_, level, event_dict):
+    """Drop the event if its level is ``debug``."""
+    if level == 'debug':
+        raise DropEvent
+    return event_dict
 
 
 class Kiwicom(object):
@@ -130,13 +132,14 @@ class Kiwicom(object):
         :param params: takes dict with parameters
         :return: dict with reformatted date
         """
-        for (k, v) in params.items():
-            if k in ('dateFrom', 'dateTo'):
-                if isinstance(v, datetime.date):
-                    params[k] = datetime.date.strftime(v, "%d/%m/%Y")
-                elif self._validate_date(v):
-                    params[k] = datetime.datetime.strptime(v, "%Y-%m-%d")\
-                        .strftime("%d/%m/%Y")
+        for k in ('dateFrom', 'dateTo'):
+            if k in params:
+                if isinstance(params[k], datetime.date):
+                    params[k] = datetime.date.strftime(params[k], "%d/%m/%Y")
+                elif isinstance(params[k], datetime.datetime):
+                    params[k] = datetime.date.strftime(params[k], "%d/%m/%Y")
+                elif self._validate_date(params[k]):
+                    params[k] = datetime.datetime.strptime(params[k], "%Y-%m-%d").strftime("%d/%m/%Y")
         return params
 
 

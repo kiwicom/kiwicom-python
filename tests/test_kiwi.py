@@ -1,44 +1,30 @@
-from kiwicom.kiwi import Search
+from kiwicom import kiwi
+
 import cerberus
 import arrow
 import requests
+
+import datetime
+from datetime import timedelta
 from random import randint
-from urllib.parse import urljoin
 
 
-class TestUrl(object):
-    def test_places_url(self):
+class TestDateValidation(object):
+    def test_date_formatting(self):
+        rand_to = randint(1, 10)
         payload = {
-            'id': 'SK',
-            'term': 'br',
-            'bounds': 'lat_lo,lat_hi',
-            'locale': 'cs',
-            'zoomLevelThreshold': 7
+            'dateFrom': datetime.datetime.today(),
+            'dateTo': datetime.date.today() + timedelta(days=rand_to),
         }
 
-        s = Search()
-        service_url = urljoin(s.API_HOST['search'], 'places')
-        api_res = requests.get(service_url, params=payload)
-        res = s.search_places(params_payload=payload)
-        assert res.url == api_res.url
+        p = kiwi.Search()._reformat_date(payload)
 
-    def test_flights_url(self):
-        payload = {
-            'to': 'LGW',
-            'flyFrom': 'PRG',
-            'dateFrom': arrow.utcnow().format('DD/MM/YYYY'),
-            'dateTo': arrow.utcnow().shift(weeks=+1).format('DD/MM/YYYY'),
-            'partner': 'picky',
-        }
-
-        s = Search()
-        service_url = urljoin(s.API_HOST['search'], 'flights')
-        api_res = requests.get(service_url, params=payload)
-        res = s.search_flights(params_payload=payload)
-        assert res.url == api_res.url
+        assert isinstance(p, dict)
+        assert datetime.datetime.strptime(p['dateFrom'], '%d/%m/%Y')
+        assert datetime.datetime.strptime(p['dateTo'], '%d/%m/%Y')
 
 
-class TestApiResp(object):
+class TestSearchResponse(object):
     def test_places_info(self):
         schema = {
             'zoomLevelThreshold': {'type': 'integer'},
@@ -54,11 +40,12 @@ class TestApiResp(object):
             'population': {'type': 'integer'}
         }
         v = cerberus.Validator(schema)
-        s = Search()
+        s = kiwi.Search()
 
         res = s.search_places(id='SK', term='br', bounds='lat_lo,lat_hi', locale='cs')
 
         v.allow_unknown = True
+        assert res.status_code == requests.codes.ok
         assert v.validate(res.json()[0])
 
     def test_flights_info(self):
@@ -93,7 +80,7 @@ class TestApiResp(object):
         }
 
         v = cerberus.Validator(schema)
-        s = Search()
+        s = kiwi.Search()
         rand_from = randint(10, 50)
         res = s.search_flights(flyFrom='PRG',
                                dateFrom=arrow.utcnow().format('DD/MM/YYYY'),
@@ -101,6 +88,7 @@ class TestApiResp(object):
                                partner='picky')
 
         v.allow_unknown = True
+        assert res.status_code == requests.codes.ok
         assert v.validate(res.json())
 
     def test_flights_multi_info(self):
@@ -136,9 +124,72 @@ class TestApiResp(object):
         }
 
         v = cerberus.Validator(schema)
-        s = Search()
+        s = kiwi.Search()
 
         res = s.search_flights_multi(json_data=payload)
 
         v.allow_unknown = True
+        assert res.status_code == requests.codes.ok
         assert v.validate(res.json()[0])
+
+
+class TestBookingResponse(object):
+    def test_save_booking_info(self):
+        s = kiwi.Search()
+        b = kiwi.Booking()
+
+        prg_to_lgw = {
+            'flyFrom': 'PRG',
+            'to': 'LGW',
+            'dateFrom': datetime.datetime.today(),
+            'dateTo': arrow.utcnow().shift(weeks=+3).format('DD/MM/YYYY'),
+            'partner': 'picky',
+            'typeFlight': 'oneway'
+        }
+        check_payload = {
+            'v': 2,
+            'pnum': 1,
+            'booking_token': s.search_flights(**prg_to_lgw).json()['data'][0]['booking_token'],
+            'bnum': 0,
+            'affily': 'otto_{market}',
+            'currency': 'USD',
+            'visitor_uniqid': '90a12afc-e240-11e6-bf01-fe55135034f3',
+        }
+        check_resp = b.check_flights(**check_payload).json()
+        booking_token = check_resp['booking_token']
+        price = check_resp['eur_payment_price']
+        save_book_payload = {
+            "lang": "en",
+            "bags": 0,
+            "passengers": [
+                {
+                    'surname': 'test',
+                    'name': 'test dont book',
+                    'title': 'mr',
+                    'birthday': 631152000,
+                    'nationality': 'test',
+                    'insurance': 'none',
+                    'cardno': None,
+                    'expiration': None,
+                    'email': 'test@test.com',
+                    'phone': '+421902123456'
+                }
+            ],
+            'price': price,
+            "currency": "czk",
+            'customerLoginID': 'unknown',
+            'customerLoginName': 'unknown',
+            "booking_token": booking_token,
+            "affily": "sp_test",
+            'visitor_uniqid': '90a12afc-e240-11e6-bf01-fe55135034f3',
+            'payment_gateway': 'zooz',
+            'override_duplicate_booking_warning': True,
+            'immediate_confirmation': False,
+            'use_credits': False,
+        }
+        booking_response = b.save_booking(json_data=save_book_payload)
+        json_response = booking_response.json()
+        assert booking_response.status_code == requests.codes.ok
+        assert 'success' in json_response['status']
+        assert 'zooz_token' in json_response
+        assert 'booking_id' in json_response

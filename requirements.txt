@@ -5,11 +5,13 @@ click==6.7
 colorama==0.3.9
 packaging==16.8
 py==1.4.33
+Pygments==2.2.0
 pyparsing==2.2.0
 pytest==3.1.0
 python-dateutil==2.6.0
 python-dotenv==0.6.4
-python-json-logger==0.1.7
 requests==2.14.2
+requirements==0.1
 six==1.10.0
 structlog==17.2.0
+structlog-pretty==0.1.1

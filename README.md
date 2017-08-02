@@ -3,7 +3,7 @@
 
 - Search API Documentaiton http://docs.skypickerpublicapi.apiary.io
 - Booking API Documentaiton http://docs.skypickerbookingapi1.apiary.io
-- Locations API Documentaiton http://docs.locations10.apiary.io/
+- Locations API Documentaiton http://docs.locations10.apiary.io
 
 # Search module:
 
@@ -106,6 +106,8 @@ Also all methods accept `headers` as an argument
 
 
 # Setup Logger
-    l = Logger(log_level='DEBUG', log_file='log.log')
+    from kiwicom import kiwi
+
+    kiwi.configure_structlog(log_level='WARNING', log_file='logs.log')
 
 ### API WRAPPER IN PROGRESS...
